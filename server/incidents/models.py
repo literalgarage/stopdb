@@ -60,13 +60,13 @@ class SchoolDistrict(models.Model):
         on_delete=models.SET_NULL,
         related_name="logos_of_districts",
     )
-    url = models.URLField()
+    url = models.URLField(blank=True)
     twitter = models.URLField(blank=True, default="")
     facebook = models.URLField(blank=True, default="")
     phone = PhoneNumberField(blank=True, default="")
 
     superintendent_name = models.CharField(max_length=100)
-    superintendent_email = models.EmailField()
+    superintendent_email = models.EmailField(blank=True)
 
     civil_rights_url = models.URLField(blank=True)
     civil_rights_contact_name = models.CharField(max_length=100, blank=True)
@@ -94,10 +94,10 @@ class School(models.Model):
         on_delete=models.CASCADE,
         related_name="schools",
     )
-    street = models.CharField(max_length=100)
-    city = models.CharField(max_length=100)
-    state = models.CharField(max_length=2)
-    zip_code = models.CharField(max_length=5)
+    street = models.CharField(max_length=100, blank=True)
+    city = models.CharField(max_length=100, blank=True)
+    state = models.CharField(max_length=2, blank=True)
+    zip_code = models.CharField(max_length=5, blank=True)
     latitude = models.FloatField(null=True, blank=True, default=None)
     longitude = models.FloatField(null=True, blank=True, default=None)
 
