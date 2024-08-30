@@ -1,13 +1,25 @@
 from mimetypes import guess_type
 
+from django.conf import settings
+from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import models
 from phonenumber_field.modelfields import PhoneNumberField
 
+from .fields import PartialDateField
+
 
 class Attachment(models.Model):
+    """An arbitrary file attachment."""
+
     name = models.CharField(max_length=100, help_text="Includes file extension")
     data = models.BinaryField()
+
+    # Type hints for reverse relations
+    extras: models.QuerySet["Extra"]
+    logos_of_districts: models.QuerySet["SchoolDistrict"]
+    school_response_materials: models.QuerySet["Incident"]
+    supporting_materials: models.QuerySet["Incident"]
 
     @property
     def content_type(self) -> str | None:
@@ -15,6 +27,8 @@ class Attachment(models.Model):
 
 
 class Extra(models.Model):
+    """Arbitrary extra data associated with a model."""
+
     name = models.CharField(max_length=100)
     value = models.TextField()
     attachment = models.ForeignKey(
@@ -28,11 +42,15 @@ class Extra(models.Model):
 
 
 class Link(models.Model):
+    """An external link."""
+
     name = models.CharField(max_length=100, blank=True, default="")
     url = models.URLField()
 
 
 class SchoolDistrict(models.Model):
+    """A school district."""
+
     name = models.CharField(max_length=100)
     logo = models.ForeignKey(
         Attachment,
@@ -65,6 +83,8 @@ class SchoolDistrict(models.Model):
 
 
 class School(models.Model):
+    """A school."""
+
     name = models.CharField(max_length=100)
     url = models.URLField()
     district = models.ForeignKey(
@@ -98,16 +118,30 @@ class School(models.Model):
 
 
 class IncidentType(models.Model):
+    """A type of incident."""
+
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True, default="")
 
 
 class SourceType(models.Model):
+    """A type of source for an incident."""
+
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True, default="")
 
 
 class Incident(models.Model):
+    """An incident."""
+
+    group = models.ForeignKey(
+        Group,
+        blank=False,
+        on_delete=models.CASCADE,
+        related_name="incidents",
+        help_text="The group that manages this incident",
+    )
+
     description = models.TextField()
 
     submitted_at = models.DateTimeField()
@@ -119,28 +153,15 @@ class Incident(models.Model):
     def is_published(self) -> bool:
         return self.published_at is not None
 
-    # TODO: future migration
+    published_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="publisher",
+    )
 
-    # published_by = models.ForeignKey(
-    #     settings.AUTH_USER_MODEL,
-    #     null=True,
-    #     blank=True,
-    #     on_delete=models.SET_NULL,
-    #     related_name="publisher",
-    # )
-
-    # group = models.ForeignKey(
-    #     Group,
-    #     null=True,
-    #     blank=True,
-    #     on_delete=models.SET_NULL,
-    #     related_name="incidents",
-    # )
-
-    # Potentially partial date when the incident occurred
-    year = models.IntegerField()
-    month = models.IntegerField(null=True, blank=True)
-    day = models.IntegerField(null=True, blank=True)
+    occurred_at = PartialDateField(help_text="When the incident occurred")
 
     school = models.ForeignKey(
         School, on_delete=models.CASCADE, related_name="incidents"
@@ -154,17 +175,44 @@ class Incident(models.Model):
     )
 
     reported_to_school = models.BooleanField()
-    reported_year = models.IntegerField(null=True, blank=True, default=None)
-    reported_month = models.IntegerField(null=True, blank=True, default=None)
-    reported_day = models.IntegerField(null=True, blank=True, default=None)
+    reported_at = PartialDateField()
 
     school_responded = models.BooleanField()
-    school_response_year = models.IntegerField(null=True, blank=True, default=None)
-    school_response_month = models.IntegerField(null=True, blank=True, default=None)
-    school_response_day = models.IntegerField(null=True, blank=True, default=None)
+    school_responded_at = PartialDateField()
     school_response = models.TextField(blank=True, default="")
     school_response_materials = models.ManyToManyField(
         Attachment, blank=True, related_name="school_response_materials"
     )
 
     extras = models.ManyToManyField(Extra)
+
+
+def group_controlling_attachment(attachment: Attachment) -> Group | None:
+    """
+    Given an attachment, return the group that controls it, if any.
+    We do this as follows:
+
+    1. We check if the attachment is part of `supporting_materials` for
+       any incident. If so, we return the group of the incident.
+    2. We check if the attachment is part of `school_response_materials`
+       for any incident. If so, we return the group of the incident.
+    3. We check if the attachment is part of an `extras` for any incident.
+       If so, we return the group of the incident.
+    4. Otherwise, we return None.
+    """
+
+    # TODO DAVE: This is inefficient. We should use a reverse
+    # relation on the Attachment model to get all incidents that
+    # reference the attachment. This would require a ManyToManyField
+    # from Attachment to Incident, which would be a good idea anyway
+    # for other reasons.
+
+    for incident in Incident.objects.all():
+        if attachment in incident.supporting_materials.all():
+            return incident.group
+        if attachment in incident.school_response_materials.all():
+            return incident.group
+        if attachment in incident.extras.all():
+            return incident.group
+
+    return None
