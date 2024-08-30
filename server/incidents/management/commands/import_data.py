@@ -1,9 +1,25 @@
 import csv
+import datetime
 import pathlib
 
+import zoneinfo
+from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand
 
-from server.incidents.models import School, SchoolDistrict
+from server.incidents.fields import PartialDate
+from server.incidents.models import (
+    Incident,
+    IncidentType,
+    Region,
+    School,
+    SchoolDistrict,
+    SourceType,
+)
+
+# NOTE WELL: this was a quickly written hack to import data from CSV files
+# exported from AirTable. Hopefully once it works, and we import all the data,
+# we can call it a day and never use it again. It's not meant to be pretty or
+# efficient, just functional.
 
 
 class Command(BaseCommand):
@@ -35,6 +51,17 @@ class Command(BaseCommand):
         incidents_path = data_dir / "incidents.csv"
         self.load_incidents(incidents_path)
 
+    def seattle(self) -> Region:
+        """Get or create the Seattle region."""
+        seattle, _ = Region.objects.get_or_create_with_group(name="Seattle")
+        return seattle
+
+    def publisher(self) -> User:
+        """Get or create the default publisher user."""
+        user = User.objects.get(pk=1)
+        assert user.is_superuser
+        return user
+
     def load_districts(self, path: pathlib.Path):
         """Load districts from a CSV file."""
         self.stdout.write(f"Loading districts from {path}")
@@ -42,6 +69,10 @@ class Command(BaseCommand):
             reader = csv.DictReader(file)
             for row in reader:
                 name = row["District-Name"].strip()
+                existing_district = SchoolDistrict.objects.filter(name=name).first()
+                if existing_district:
+                    self.stdout.write(f"District already exists: {existing_district}")
+                    continue
                 assert name
                 # TODO DAVE: logo
                 url = row["District-URL"].strip()
@@ -80,7 +111,7 @@ class Command(BaseCommand):
                     board_url=board_url,
                 )
 
-                self.stdout.write(f"District: {district.pk}: {district.name}")
+                self.stdout.write(f"Created district: {district}")
 
     def load_schools(self, path: pathlib.Path):
         """Load schools from a CSV file."""
@@ -90,6 +121,10 @@ class Command(BaseCommand):
             for row in reader:
                 name = row["Name"].strip()
                 assert name
+                existing_school = School.objects.filter(name=name).first()
+                if existing_school:
+                    self.stdout.write(f"School already exists: {existing_school}")
+                    continue
                 url = row["Website"].strip()
                 # assert url
                 school_type = row["School-Type"].strip().lower()
@@ -190,8 +225,77 @@ class Command(BaseCommand):
                     is_high=is_high,
                 )
 
-                self.stdout.write(f"School: {school.pk}: {school.name}")
+                self.stdout.write(f"Created school: {school}")
 
     def load_incidents(self, path: pathlib.Path):
         """Load incidents from a CSV file."""
         self.stdout.write(f"Loading incidents from {path}")
+        # TODO DAVE: so far, all incidents are in Seattle
+        region = self.seattle()
+        # TODO DAVE: so far, all incidents are published by the default user
+        publisher = self.publisher()
+
+        with open(path, encoding="utf-8-sig") as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                yyyy = row["Year"].strip()
+                assert len(yyyy) == 4, f"Year: {yyyy}"
+                mm = row["Month"].strip() or None
+                assert mm is None or len(mm) == 2, f"Month: {mm}"
+                dd = row["Day"].strip() or None
+                if dd == "null":
+                    dd = None
+                assert dd is None or 1 <= len(dd) <= 2, f"Day: {dd}"
+                occurred_at = PartialDate(
+                    year=int(yyyy),
+                    month=int(mm) if mm else None,
+                    day=int(dd) if dd else None,
+                )
+                school_name = row["School"].strip()
+                school = School.objects.get(name=school_name)
+                incident_type_list = [
+                    it.strip() for it in row["Incident-Type"].split(",")
+                ]
+                incident_types: list[IncidentType] = []
+                for incident_type_name in incident_type_list:
+                    incident_type, _ = IncidentType.objects.get_or_create(
+                        name=incident_type_name
+                    )
+                    incident_types.append(incident_type)
+                description = row["Incident-Description"].strip()
+                # TODO DAVE: supporting materials
+                # TODO DAVE: school response
+                # TODO DAVE: media coverage
+                # TODO DAVE: social media post extras?
+                # TODO DAVE: other-related extras?
+                reported_school_str = row["Reported-School"].strip()
+                reported_to_school = reported_school_str == "Yes"
+                source_list = [s.strip() for s in row["Source(s)"].split(",")]
+                source_types: list[SourceType] = []
+                for source_name in source_list:
+                    source_type, _ = SourceType.objects.get_or_create(name=source_name)
+                    source_types.append(source_type)
+
+                last_modified_str = row["Last Modified"].strip()
+                # Parse date in format "M/DD/YYYY HH:MMam/pm"
+                last_modified = datetime.datetime.strptime(
+                    last_modified_str, "%m/%d/%Y %I:%M%p"
+                )
+                # Put it in the America/Los_Angeles timezone
+                PACIFIC = zoneinfo.ZoneInfo("America/Los_Angeles")
+                last_modified = last_modified.replace(tzinfo=PACIFIC)
+
+                incident = Incident.objects.create(
+                    region=region,
+                    occurred_at=occurred_at,
+                    school=school,
+                    description=description,
+                    reported_to_school=reported_to_school,
+                    submitted_at=last_modified,  # Best we can do for now
+                    published_at=last_modified,  # Best we can do for now
+                    published_by=publisher,
+                )
+                incident.incident_types.set(incident_types)
+                incident.source_types.set(source_types)
+
+                self.stdout.write(f"Created incident: {incident}")

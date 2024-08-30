@@ -1,4 +1,5 @@
 from django.contrib import admin
+from django.utils.safestring import mark_safe
 
 from server.admin import admin_site
 
@@ -8,10 +9,16 @@ from .models import (
     Incident,
     IncidentType,
     Link,
+    Region,
     School,
     SchoolDistrict,
     SourceType,
 )
+
+
+class RegionAdmin(admin.ModelAdmin):
+    list_display = ("name",)
+    search_fields = ("id", "name")
 
 
 class AttachmentAdmin(admin.ModelAdmin):
@@ -49,7 +56,6 @@ class SchoolDistrictAdmin(admin.ModelAdmin):
 
 class SchoolAdmin(admin.ModelAdmin):
     list_display = (
-        "id",
         "name",
         "city",
         "state",
@@ -59,22 +65,24 @@ class SchoolAdmin(admin.ModelAdmin):
         "is_high",
         "district_link",
     )
-    search_fields = ("id", "name", "url", "district", "city", "state")
+    search_fields = ("id", "name", "url", "district__name", "city", "state")
 
     def district_link(self, obj):
-        return f'<a href="/admin/incidents/schooldistrict/{obj.district.id}/change/">{obj.district.name}</a>'
+        if not obj.district:
+            return ""
+        return mark_safe(
+            f'<a href="/admin/incidents/schooldistrict/{obj.district.id}/change/">{obj.district.name}</a>'
+        )
 
     district_link.allow_tags = True
 
 
 class IncidentTypeAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "description")
-    search_fields = ("id", "name", "description")
+    list_display = ("name", "description")
 
 
 class SourceTypeAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "description")
-    search_fields = ("id", "name", "description")
+    list_display = ("name", "description")
 
 
 class IncidentAdmin(admin.ModelAdmin):
@@ -111,9 +119,14 @@ class IncidentAdmin(admin.ModelAdmin):
         )
 
     def school_link(self, obj):
-        return f'<a href="/admin/incidents/school/{obj.school.id}/change/">{obj.school.name}</a>'
+        return mark_safe(
+            f'<a href="/admin/incidents/school/{obj.school.id}/change/">{obj.school.name}</a>'
+        )
+
+    school_link.allow_tags = True
 
 
+admin_site.register(Region, RegionAdmin)
 admin_site.register(Attachment, AttachmentAdmin)
 admin_site.register(Extra, ExtraAdmin)
 admin_site.register(Link, LinkAdmin)

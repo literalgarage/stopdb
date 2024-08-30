@@ -28,6 +28,7 @@ class PartialDate:
     """
     A partial date, with support for:
 
+    - Nothing
     - Year
     - Year and month
     - Year, month, and day
@@ -35,7 +36,7 @@ class PartialDate:
     No other combinations are allowed.
     """
 
-    year: int
+    year: int | None
     month: int | None
     day: int | None
 
@@ -47,10 +48,13 @@ class PartialDate:
             raise ValidationError("Invalid month")
         if self.day is not None and not (1 <= self.day <= 31):
             raise ValidationError("Invalid day")
-        if not (1900 <= self.year <= 9999):
+        if self.year is None and (self.month is not None or self.day is not None):
+            raise ValidationError("Month and day require year")
+        if self.year is not None and not (1900 <= self.year <= 9999):
             raise ValidationError("Invalid year")
         if self.day is not None:
             assert self.month is not None
+            assert self.year is not None
             try:
                 datetime.date(self.year, self.month, self.day)
             except ValueError:
@@ -61,8 +65,10 @@ class PartialDate:
         """
         Convert a string to a PartialDate.
 
-        The string should be in the format "YYYY", "YYYY-MM", or "YYYY-MM-DD".
+        The string should be in the format "", "YYYY", "YYYY-MM", or "YYYY-MM-DD".
         """
+        if not value:
+            return cls(year=None, month=None, day=None)
         parts = value.split("-")
         y_str, m_str, d_str = parts[0], None, None
         if len(parts) > 1:
@@ -87,8 +93,10 @@ class PartialDate:
         """
         Convert the PartialDate to a string.
 
-        The string will be in the format "YYYY", "YYYY-MM", or "YYYY-MM-DD".
+        The string will be in the format "", "YYYY", "YYYY-MM", or "YYYY-MM-DD".
         """
+        if self.year is None:
+            return ""
         if self.month is None:
             return f"{self.year:04}"
         if self.day is None:
@@ -124,6 +132,7 @@ class PartialDateField(models.CharField):
 
     def __init__(self, *args, **kwargs):
         kwargs["max_length"] = 10
+        kwargs["blank"] = True
         super().__init__(*args, **kwargs)
 
     def to_python(self, value: str) -> PartialDate:
@@ -138,6 +147,7 @@ class PartialDateField(models.CharField):
     def deconstruct(self):
         name, path, args, kwargs = super().deconstruct()
         del kwargs["max_length"]
+        del kwargs["blank"]
         return name, path, args, kwargs
 
     def formfield(self, **kwargs):
