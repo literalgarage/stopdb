@@ -1,0 +1,15 @@
+asgiref==3.8.1
+dj-database-url==2.2.0
+django==5.1
+django-phonenumber-field==8.0.0
+django-stubs==5.0.4
+django-stubs-ext==5.0.4
+mypy==1.11.1
+mypy-extensions==1.0.0
+phonenumberslite==8.13.43
+psycopg==3.2.1
+ruff==0.6.2
+sqlparse==0.5.1
+types-pyyaml==6.0.12.20240808
+typing-extensions==4.12.2
+whitenoise==6.7.0
