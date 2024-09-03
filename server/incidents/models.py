@@ -17,13 +17,13 @@ class RegionManager(models.Manager):
     def create_with_group(self, name: str) -> "Region":
         """Create a region with a group."""
         slug = slugify(name)
-        group = Group.objects.create(name=self._group_name(name))
+        group = Group.objects.create(name=Region.default_group_name(name))
         return self.create(name=name, slug=slug, group=group)
 
     def get_or_create_with_group(self, name: str) -> tuple["Region", bool]:
         """Get or create a region with a group."""
         slug = slugify(name)
-        group, _ = Group.objects.get_or_create(name=self._group_name(name))
+        group, _ = Group.objects.get_or_create(name=Region.default_group_name(name))
         return self.get_or_create(slug=slug, defaults={"name": name, "group": group})
 
 
@@ -41,12 +41,21 @@ class Region(models.Model):
         help_text="The group that controls this region",
     )
 
+    @classmethod
+    def default_group_name(cls, name: str) -> str:
+        return f"{name} Admins"
+
     def __str__(self) -> str:
         return f"Region ({self.pk}): {self.name}"
 
 
 class Attachment(models.Model):
     """An arbitrary file attachment."""
+
+    # NOTE WELL: keeping attachments in the database is not a good idea
+    # over the long term, but boy is it convenient for now. Eventually
+    # we should connect an S3 bucket and use Django Storages to store
+    # attachments there.
 
     name = models.CharField(
         max_length=100, help_text="Includes file extension", unique=True
@@ -63,6 +72,13 @@ class Attachment(models.Model):
     def content_type(self) -> str | None:
         return guess_type(self.name)[0]
 
+    @property
+    def is_image(self) -> bool:
+        content_type = self.content_type
+        if content_type is None:
+            return False
+        return content_type.startswith("image/") or content_type == "image/svg+xml"
+
     def __str__(self) -> str:
         return f"Attachment ({self.pk}): {self.name}"
 
@@ -72,13 +88,13 @@ class Extra(models.Model):
 
     name = models.CharField(max_length=100)
     value = models.TextField()
-    attachment = models.ForeignKey(
+    attachment = models.OneToOneField(
         Attachment,
-        default=None,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="extras",
+        default=None,
     )
 
     def __str__(self) -> str:
@@ -99,14 +115,15 @@ class SchoolDistrict(models.Model):
     """A school district."""
 
     name = models.CharField(max_length=100)
-    logo = models.ForeignKey(
+    logo = models.OneToOneField(
         Attachment,
-        default=None,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="logos_of_districts",
+        default=None,
     )
+
     url = models.URLField(blank=True)
     twitter = models.URLField(blank=True, default="")
     facebook = models.URLField(blank=True, default="")
@@ -232,6 +249,7 @@ class Incident(models.Model):
     source_types = models.ManyToManyField(SourceType)
 
     related_links = models.ManyToManyField(Link, blank=True, related_name="incidents")
+
     supporting_materials = models.ManyToManyField(
         Attachment, blank=True, related_name="supporting_materials"
     )

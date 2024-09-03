@@ -81,8 +81,10 @@ class Command(BaseCommand):
                 logo_name, logo_url = logo_parts_str.split("(")
                 logo_name = logo_name.strip()
                 logo_url = logo_url.strip(")").strip()
+                logo_data_response = httpx.get(logo_url)
+                logo_data_response.raise_for_status()
                 logo_attachment = Attachment.objects.create(
-                    name=logo_name, data=httpx.get(logo_url).content
+                    name=logo_name, data=logo_data_response.content
                 )
 
                 url = row["District-URL"].strip()
