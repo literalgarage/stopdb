@@ -164,3 +164,4 @@ cython_debug/
 
 # Real environments.
 .env
+.DS_Store

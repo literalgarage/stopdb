@@ -48,7 +48,9 @@ class Region(models.Model):
 class Attachment(models.Model):
     """An arbitrary file attachment."""
 
-    name = models.CharField(max_length=100, help_text="Includes file extension")
+    name = models.CharField(
+        max_length=100, help_text="Includes file extension", unique=True
+    )
     data = models.BinaryField()
 
     # Type hints for reverse relations
@@ -237,8 +239,7 @@ class Incident(models.Model):
     reported_to_school = models.BooleanField(default=False)
     reported_at = PartialDateField(blank=True, default="")
 
-    school_responded = models.BooleanField(default=False)
-    school_responded_at = PartialDateField(blank=True, default="")
+    school_responded_at = PartialDateField(blank=True, default="")  # if known
     school_response = models.TextField(blank=True, default="")
     school_response_materials = models.ManyToManyField(
         Attachment, blank=True, related_name="school_response_materials"
@@ -246,21 +247,25 @@ class Incident(models.Model):
 
     extras = models.ManyToManyField(Extra)
 
+    @property
+    def school_responded(self) -> bool:
+        return bool(self.school_response)
+
     def __str__(self) -> str:
         return f"Incident ({self.pk}): {self.occurred_at} {self.school.name} {self.description[:333]}..."
 
 
-def group_controlling_attachment(attachment: Attachment) -> Group | None:
+def region_controlling_attachment(attachment: Attachment) -> Region | None:
     """
-    Given an attachment, return the group that controls it, if any.
+    Given an attachment, return the region that controls it, if any.
     We do this as follows:
 
     1. We check if the attachment is part of `supporting_materials` for
-       any incident. If so, we return the group of the incident.
+       any incident. If so, we return the region of the incident.
     2. We check if the attachment is part of `school_response_materials`
-       for any incident. If so, we return the group of the incident.
+       for any incident. If so, we return the region of the incident.
     3. We check if the attachment is part of an `extras` for any incident.
-       If so, we return the group of the incident.
+       If so, we return the region of the incident.
     4. Otherwise, we return None.
     """
 
@@ -272,10 +277,10 @@ def group_controlling_attachment(attachment: Attachment) -> Group | None:
 
     for incident in Incident.objects.all():
         if attachment in incident.supporting_materials.all():
-            return incident.group
+            return incident.region
         if attachment in incident.school_response_materials.all():
-            return incident.group
+            return incident.region
         if attachment in incident.extras.all():
-            return incident.group
+            return incident.region
 
     return None

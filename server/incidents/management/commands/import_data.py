@@ -2,12 +2,15 @@ import csv
 import datetime
 import pathlib
 
+import httpx
 import zoneinfo
 from django.contrib.auth.models import User
 from django.core.management.base import BaseCommand
 
 from server.incidents.fields import PartialDate
 from server.incidents.models import (
+    Attachment,
+    Extra,
     Incident,
     IncidentType,
     Region,
@@ -74,7 +77,14 @@ class Command(BaseCommand):
                     self.stdout.write(f"District already exists: {existing_district}")
                     continue
                 assert name
-                # TODO DAVE: logo
+                logo_parts_str = row["District-Logo"].strip()
+                logo_name, logo_url = logo_parts_str.split("(")
+                logo_name = logo_name.strip()
+                logo_url = logo_url.strip(")").strip()
+                logo_attachment = Attachment.objects.create(
+                    name=logo_name, data=httpx.get(logo_url).content
+                )
+
                 url = row["District-URL"].strip()
                 assert url
                 twitter = row["District-Twitter"].strip() or ""
@@ -91,11 +101,11 @@ class Command(BaseCommand):
                 hib_contact_name = row["HIB-Contact"].strip() or ""
                 hib_contact_email = row["HIB-Email"].strip() or ""
                 board_url = row["Board-URL"].strip() or ""
-                # TODO DAVE: extras?
 
                 district = SchoolDistrict.objects.create(
                     name=name,
                     url=url,
+                    logo=logo_attachment,
                     twitter=twitter,
                     facebook=facebook,
                     phone=phone,
@@ -230,9 +240,9 @@ class Command(BaseCommand):
     def load_incidents(self, path: pathlib.Path):
         """Load incidents from a CSV file."""
         self.stdout.write(f"Loading incidents from {path}")
-        # TODO DAVE: so far, all incidents are in Seattle
+        # NOTE: so far, all incidents are in Seattle
         region = self.seattle()
-        # TODO DAVE: so far, all incidents are published by the default user
+        # NOTE: so far, all incidents are published by the default user
         publisher = self.publisher()
 
         with open(path, encoding="utf-8-sig") as file:
@@ -263,11 +273,59 @@ class Command(BaseCommand):
                     )
                     incident_types.append(incident_type)
                 description = row["Incident-Description"].strip()
-                # TODO DAVE: supporting materials
-                # TODO DAVE: school response
-                # TODO DAVE: media coverage
-                # TODO DAVE: social media post extras?
-                # TODO DAVE: other-related extras?
+
+                supporting_materials: list[Attachment] = []
+
+                supporting_materials_str = row["Supporting-Materials"].strip()
+                if supporting_materials_str:
+                    supporting_materials_parts = [
+                        sm.strip() for sm in supporting_materials_str.split(",")
+                    ]
+                    for supporting_material in supporting_materials_parts:
+                        supporting_material_name, supporting_material_url = (
+                            supporting_material.split("(")
+                        )
+                        supporting_material_name = supporting_material_name.strip()
+                        supporting_material_url = supporting_material_url.strip(
+                            ")"
+                        ).strip()
+                        self.stdout.write(
+                            f"Created supporting material: {supporting_material_name} ({supporting_material_url})"
+                        )
+                        supporting_material_response = httpx.get(
+                            supporting_material_url
+                        )
+                        supporting_material_response.raise_for_status()
+                        supporting_material = Attachment.objects.create(
+                            name=supporting_material_name,
+                            data=supporting_material_response.content,
+                        )
+                        supporting_materials.append(supporting_material)
+
+                school_response = row["School-Response"].strip()
+
+                extras: list[Extra] = []
+                media_coverage = row["Media-Coverage"].strip()
+                if media_coverage:
+                    extra = Extra.objects.create(
+                        name="media-coverage", value=media_coverage
+                    )
+                    extras.append(extra)
+
+                social_media_post = row["Social-Media-Post"].strip()
+                if social_media_post:
+                    extra = Extra.objects.create(
+                        name="social-media-post", value=social_media_post
+                    )
+                    extras.append(extra)
+
+                other_related = row["Other-Related"].strip()
+                if other_related:
+                    extra = Extra.objects.create(
+                        name="other-related", value=other_related
+                    )
+                    extras.append(extra)
+
                 reported_school_str = row["Reported-School"].strip()
                 reported_to_school = reported_school_str == "Yes"
                 source_list = [s.strip() for s in row["Source(s)"].split(",")]
@@ -294,8 +352,10 @@ class Command(BaseCommand):
                     submitted_at=last_modified,  # Best we can do for now
                     published_at=last_modified,  # Best we can do for now
                     published_by=publisher,
+                    school_response=school_response,
                 )
                 incident.incident_types.set(incident_types)
                 incident.source_types.set(source_types)
+                incident.supporting_materials.set(supporting_materials)
 
                 self.stdout.write(f"Created incident: {incident}")
