@@ -188,8 +188,8 @@ class School(models.Model):
     )
     street = models.CharField(max_length=100, blank=True)
     city = models.CharField(max_length=100, blank=True)
-    state = models.CharField(max_length=2, blank=True)
-    zip_code = models.CharField(max_length=5, blank=True)
+    state = models.CharField(max_length=64, blank=True)
+    zip_code = models.CharField(max_length=10, blank=True)
     latitude = models.FloatField(null=True, blank=True, default=None)
     longitude = models.FloatField(null=True, blank=True, default=None)
 
