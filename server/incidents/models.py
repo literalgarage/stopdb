@@ -31,7 +31,7 @@ class AttachmentBase(models.Model):
     # attachments there.
 
     name = models.CharField(
-        max_length=100, help_text="Includes file extension", unique=True
+        max_length=100, help_text="Includes file extension", db_index=True
     )
     data = models.BinaryField()
 
@@ -47,9 +47,11 @@ class AttachmentBase(models.Model):
         return content_type.startswith("image/") or content_type == "image/svg+xml"
 
     @property
-    def url(self) -> str:
-        kebab_name = pascal_to_kebab(str(self._meta))
-        return reverse("incidents:attachment", args=[kebab_name, self.name])
+    def url(self) -> str | None:
+        if self.pk is None:
+            return None
+        kebab_name = pascal_to_kebab(self.__class__.__name__)
+        return reverse("incidents:attachment", args=[kebab_name, self.pk, self.name])
 
     def __str__(self) -> str:
         return f"{str(self._meta)} ({self.pk}): {self.name}"
@@ -139,7 +141,7 @@ class SchoolDistrict(models.Model):
     facebook = models.URLField(blank=True, default="")
     phone = PhoneNumberField(blank=True, default="")
 
-    superintendent_name = models.CharField(max_length=100)
+    superintendent_name = models.CharField(max_length=100, blank=True)
     superintendent_email = models.EmailField(blank=True)
 
     civil_rights_url = models.URLField(blank=True)

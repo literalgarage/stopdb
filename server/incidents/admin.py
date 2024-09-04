@@ -4,7 +4,6 @@ from django import forms
 from django.contrib import admin
 from django.contrib.auth.models import Group
 from django.core.files import File
-from django.urls import reverse
 from django.utils.safestring import mark_safe
 
 from server.admin import admin_site
@@ -55,18 +54,21 @@ class AttachmentAdminBase(admin.TabularInline):
     # derived classes: Add a model = and a form =
     fields = ("name", "attachment_display", "choose_file")
     readonly_fields = ("attachment_display",)
+    extra = 0
 
-    @admin.display(description="Attachment")
+    @admin.display(description="Image or download link")
     def attachment_display(self, obj: AttachmentBase):
-        attachment_url = reverse("incidents:attachment", args=[obj.name])
+        if obj.url is None:
+            return ""
         if obj.is_image:
-            return mark_safe(f'<img src="{attachment_url}" style="max-width: 72px;">')
-        return mark_safe(f'<a href="{attachment_url}">{obj.name}</a>')
+            return mark_safe(f'<img src="{obj.url}" style="max-width: 72px;">')
+        return mark_safe(f'<a href="{obj.url}">{obj.name}</a>')
 
 
 class ExtraAdminBase(admin.TabularInline):
     list_display = ("name", "value")
     search_fields = ("name", "value")
+    extra = 0
 
 
 # -----------------------------------------------------------------------------
@@ -77,6 +79,7 @@ class ExtraAdminBase(admin.TabularInline):
 class RegionAdmin(admin.ModelAdmin):
     list_display = ("name",)
     search_fields = ("id", "name")
+    readonly_fields = ("group",)
 
     def save_model(self, request, obj: Region, form, change):
         # If we're creating a new region, we'll need to create a group
@@ -159,6 +162,7 @@ class RelatedLinkAdmin(admin.TabularInline):
     model = RelatedLink
     list_display = ("name", "url")
     search_fields = ("name", "url")
+    extra = 0
 
 
 class IncidentTypeAdmin(admin.ModelAdmin):

@@ -9,6 +9,7 @@ from django.core.management.base import BaseCommand
 
 from server.incidents.fields import PartialDate
 from server.incidents.models import (
+    DistrictLogo,
     Incident,
     IncidentExtra,
     IncidentType,
@@ -77,23 +78,13 @@ class Command(BaseCommand):
                     self.stdout.write(f"District already exists: {existing_district}")
                     continue
                 assert name
-                logo_parts_str = row["District-Logo"].strip()
-                logo_name, logo_url = logo_parts_str.split("(")
-                logo_name = logo_name.strip()
-                logo_url = logo_url.strip(")").strip()
-                logo_data_response = httpx.get(logo_url)
-                logo_data_response.raise_for_status()
-                logo_attachment = Attachment.objects.create(
-                    name=logo_name, data=logo_data_response.content
-                )
-
                 url = row["District-URL"].strip()
                 assert url
                 twitter = row["District-Twitter"].strip() or ""
                 facebook = row["District-Facebook"].strip() or ""
                 phone = row["District-Phone"].strip() or ""
                 superintendent_name = row["Superintendent-Name"].strip()
-                assert superintendent_name
+                # assert superintendent_name
                 superintendent_email = row["Superintendent-Email"].strip()
                 civil_rights_url = row["CivilRights-URL"].strip() or ""
                 civil_rights_contact_name = row["CivilRights-Contact"].strip() or ""
@@ -107,7 +98,6 @@ class Command(BaseCommand):
                 district = SchoolDistrict.objects.create(
                     name=name,
                     url=url,
-                    logo=logo_attachment,
                     twitter=twitter,
                     facebook=facebook,
                     phone=phone,
@@ -121,6 +111,16 @@ class Command(BaseCommand):
                     hib_contact_name=hib_contact_name,
                     hib_contact_email=hib_contact_email,
                     board_url=board_url,
+                )
+
+                logo_parts_str = row["District-Logo"].strip()
+                logo_name, logo_url = logo_parts_str.split("(")
+                logo_name = logo_name.strip()
+                logo_url = logo_url.strip(")").strip()
+                logo_data_response = httpx.get(logo_url)
+                logo_data_response.raise_for_status()
+                _ = DistrictLogo.objects.create(
+                    district=district, name=logo_name, data=logo_data_response.content
                 )
 
                 self.stdout.write(f"Created district: {district}")
