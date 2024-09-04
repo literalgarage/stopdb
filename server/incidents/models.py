@@ -4,13 +4,79 @@ from django.conf import settings
 from django.contrib.auth.models import Group
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.urls import reverse
 from django.utils.text import slugify
 from phonenumber_field.modelfields import PhoneNumberField
 
 from .fields import PartialDateField
+from .kebab import pascal_to_kebab
+
+# -----------------------------------------------------------------------------
+# Abstract base models
+# -----------------------------------------------------------------------------
+
+# NOTE: Django supports a notion of a GenericForeignKey, which normally we
+# would probably use for Attachment and for Extras. But because the
+# SQL database we're creating is expected to be used by third parties without
+# the convenience of Django's ORM, we're going to use a more explicit
+# approach here.
+
+
+class AttachmentBase(models.Model):
+    """An arbitrary file attachment."""
+
+    # NOTE WELL: keeping attachments in the database is not a good idea
+    # over the long term, but boy is it convenient for now. Eventually
+    # we should connect an S3 bucket and use Django Storages to store
+    # attachments there.
+
+    name = models.CharField(
+        max_length=100, help_text="Includes file extension", unique=True
+    )
+    data = models.BinaryField()
+
+    @property
+    def content_type(self) -> str | None:
+        return guess_type(self.name)[0]
+
+    @property
+    def is_image(self) -> bool:
+        content_type = self.content_type
+        if content_type is None:
+            return False
+        return content_type.startswith("image/") or content_type == "image/svg+xml"
+
+    @property
+    def url(self) -> str:
+        kebab_name = pascal_to_kebab(str(self._meta))
+        return reverse("incidents:attachment", args=[kebab_name, self.name])
+
+    def __str__(self) -> str:
+        return f"{str(self._meta)} ({self.pk}): {self.name}"
+
+    class Meta:
+        abstract = True
+
+
+class ExtraBase(models.Model):
+    name = models.CharField(max_length=100, db_index=True)
+    value = models.TextField()
+
+    def __str__(self) -> str:
+        return f"{str(self._meta)} ({self.pk}): {self.name} -> {self.value}"
+
+    class Meta:
+        abstract = True
+
+
+# -----------------------------------------------------------------------------
+# Concrete models: Region
+# -----------------------------------------------------------------------------
 
 
 class RegionManager(models.Manager):
+    """Manages a table of geographic regions."""
+
     def _group_name(self, name: str) -> str:
         return f"{name} Admins"
 
@@ -49,80 +115,24 @@ class Region(models.Model):
         return f"Region ({self.pk}): {self.name}"
 
 
-class Attachment(models.Model):
-    """An arbitrary file attachment."""
-
-    # NOTE WELL: keeping attachments in the database is not a good idea
-    # over the long term, but boy is it convenient for now. Eventually
-    # we should connect an S3 bucket and use Django Storages to store
-    # attachments there.
-
-    name = models.CharField(
-        max_length=100, help_text="Includes file extension", unique=True
-    )
-    data = models.BinaryField()
-
-    # Type hints for reverse relations
-    extras: models.QuerySet["Extra"]
-    logos_of_districts: models.QuerySet["SchoolDistrict"]
-    school_response_materials: models.QuerySet["Incident"]
-    supporting_materials: models.QuerySet["Incident"]
-
-    @property
-    def content_type(self) -> str | None:
-        return guess_type(self.name)[0]
-
-    @property
-    def is_image(self) -> bool:
-        content_type = self.content_type
-        if content_type is None:
-            return False
-        return content_type.startswith("image/") or content_type == "image/svg+xml"
-
-    def __str__(self) -> str:
-        return f"Attachment ({self.pk}): {self.name}"
-
-
-class Extra(models.Model):
-    """Arbitrary extra data associated with a model."""
-
-    name = models.CharField(max_length=100)
-    value = models.TextField()
-    attachment = models.OneToOneField(
-        Attachment,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="extras",
-        default=None,
-    )
-
-    def __str__(self) -> str:
-        return f"Extra ({self.pk}): {self.name} -> {self.value}"
-
-
-class Link(models.Model):
-    """An external link."""
-
-    name = models.CharField(max_length=100, blank=True, default="")
-    url = models.URLField()
-
-    def __str__(self) -> str:
-        return f"Link ({self.pk}): {self.name}"
+# -----------------------------------------------------------------------------
+# Concrete models: School District & School
+# -----------------------------------------------------------------------------
 
 
 class SchoolDistrict(models.Model):
     """A school district."""
 
     name = models.CharField(max_length=100)
-    logo = models.OneToOneField(
-        Attachment,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="logos_of_districts",
-        default=None,
-    )
+
+    logo: "DistrictLogo"
+
+    @property
+    def safe_logo(self) -> "DistrictLogo | None":
+        try:
+            return self.logo
+        except DistrictLogo.DoesNotExist:
+            return None
 
     url = models.URLField(blank=True)
     twitter = models.URLField(blank=True, default="")
@@ -143,10 +153,23 @@ class SchoolDistrict(models.Model):
 
     board_url = models.URLField(blank=True)
 
-    extras = models.ManyToManyField(Extra, blank=True, related_name="district_extras")
-
     def __str__(self) -> str:
         return f"{self.name} ({self.pk})"
+
+
+class DistrictLogo(AttachmentBase):
+    """A logo for a school district."""
+
+    district = models.OneToOneField(
+        SchoolDistrict,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="logo",
+    )
+
+    class Meta:
+        abstract = False
 
 
 class School(models.Model):
@@ -174,8 +197,6 @@ class School(models.Model):
     is_middle = models.BooleanField()
     is_high = models.BooleanField()
 
-    extras = models.ManyToManyField(Extra, blank=True, related_name="school_extras")
-
     # Validate that at least one of the three is true
     def clean(self):
         if not (self.is_elementary or self.is_middle or self.is_high):
@@ -185,6 +206,11 @@ class School(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.pk})"
+
+
+# -----------------------------------------------------------------------------
+# Concrete models: Incidents & related
+# -----------------------------------------------------------------------------
 
 
 class IncidentType(models.Model):
@@ -207,6 +233,32 @@ class SourceType(models.Model):
         return f"Source type: {self.name} ({self.pk})"
 
 
+class RelatedLink(models.Model):
+    """An external link related to an incident."""
+
+    name = models.CharField(max_length=100, blank=True, default="")
+    url = models.URLField()
+    incident = models.ForeignKey(
+        "Incident", on_delete=models.CASCADE, related_name="related_links"
+    )
+
+    def __str__(self) -> str:
+        return f"Link ({self.pk}): {self.name}"
+
+
+class IncidentExtra(ExtraBase):
+    """An extra field for an incident."""
+
+    incident = models.ForeignKey(
+        "Incident", on_delete=models.CASCADE, related_name="extras"
+    )
+
+    class Meta:
+        abstract = False
+        verbose_name = "Incident Extra"
+        verbose_name_plural = "Incident Extras"
+
+
 class Incident(models.Model):
     """An incident."""
 
@@ -226,6 +278,7 @@ class Incident(models.Model):
     submitted_at = models.DateTimeField()
     updated_at = models.DateTimeField(auto_now=True)
 
+    # TODO DAVE: consider inbound reports vs published incidents
     published_at = models.DateTimeField(null=True, blank=True, default=None)
 
     @property
@@ -248,22 +301,14 @@ class Incident(models.Model):
     incident_types = models.ManyToManyField(IncidentType)
     source_types = models.ManyToManyField(SourceType)
 
-    related_links = models.ManyToManyField(Link, blank=True, related_name="incidents")
-
-    supporting_materials = models.ManyToManyField(
-        Attachment, blank=True, related_name="supporting_materials"
-    )
+    supporting_materials: models.QuerySet["SupportingMaterial"]
+    school_response_materials: models.QuerySet["SchoolResponseMaterial"]
 
     reported_to_school = models.BooleanField(default=False)
     reported_at = PartialDateField(blank=True, default="")
 
     school_responded_at = PartialDateField(blank=True, default="")  # if known
     school_response = models.TextField(blank=True, default="")
-    school_response_materials = models.ManyToManyField(
-        Attachment, blank=True, related_name="school_response_materials"
-    )
-
-    extras = models.ManyToManyField(Extra)
 
     @property
     def school_responded(self) -> bool:
@@ -273,32 +318,23 @@ class Incident(models.Model):
         return f"Incident ({self.pk}): {self.occurred_at} {self.school.name} {self.description[:333]}..."
 
 
-def region_controlling_attachment(attachment: Attachment) -> Region | None:
-    """
-    Given an attachment, return the region that controls it, if any.
-    We do this as follows:
+class SupportingMaterial(AttachmentBase):
+    """A supporting material for an incident."""
 
-    1. We check if the attachment is part of `supporting_materials` for
-       any incident. If so, we return the region of the incident.
-    2. We check if the attachment is part of `school_response_materials`
-       for any incident. If so, we return the region of the incident.
-    3. We check if the attachment is part of an `extras` for any incident.
-       If so, we return the region of the incident.
-    4. Otherwise, we return None.
-    """
+    incident = models.ForeignKey(
+        Incident, on_delete=models.CASCADE, related_name="supporting_materials"
+    )
 
-    # TODO DAVE: This is inefficient. We should use a reverse
-    # relation on the Attachment model to get all incidents that
-    # reference the attachment. This would require a ManyToManyField
-    # from Attachment to Incident, which would be a good idea anyway
-    # for other reasons.
+    class Meta:
+        abstract = False
 
-    for incident in Incident.objects.all():
-        if attachment in incident.supporting_materials.all():
-            return incident.region
-        if attachment in incident.school_response_materials.all():
-            return incident.region
-        if attachment in incident.extras.all():
-            return incident.region
 
-    return None
+class SchoolResponseMaterial(AttachmentBase):
+    """A school response material for an incident."""
+
+    incident = models.ForeignKey(
+        Incident, on_delete=models.CASCADE, related_name="school_response_materials"
+    )
+
+    class Meta:
+        abstract = False

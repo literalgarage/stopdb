@@ -4,5 +4,5 @@ from .views import attachment
 
 app_name = "incidents"
 urlpatterns = [
-    path("attachment/<str:name>", attachment, name="attachment"),
+    path("a/<str:klass>/<str:name>", attachment, name="attachment"),
 ]

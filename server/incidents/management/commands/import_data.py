@@ -9,14 +9,14 @@ from django.core.management.base import BaseCommand
 
 from server.incidents.fields import PartialDate
 from server.incidents.models import (
-    Attachment,
-    Extra,
     Incident,
+    IncidentExtra,
     IncidentType,
     Region,
     School,
     SchoolDistrict,
     SourceType,
+    SupportingMaterial,
 )
 
 # NOTE WELL: this was a quickly written hack to import data from CSV files
@@ -276,57 +276,7 @@ class Command(BaseCommand):
                     incident_types.append(incident_type)
                 description = row["Incident-Description"].strip()
 
-                supporting_materials: list[Attachment] = []
-
-                supporting_materials_str = row["Supporting-Materials"].strip()
-                if supporting_materials_str:
-                    supporting_materials_parts = [
-                        sm.strip() for sm in supporting_materials_str.split(",")
-                    ]
-                    for supporting_material in supporting_materials_parts:
-                        supporting_material_name, supporting_material_url = (
-                            supporting_material.split("(")
-                        )
-                        supporting_material_name = supporting_material_name.strip()
-                        supporting_material_url = supporting_material_url.strip(
-                            ")"
-                        ).strip()
-                        self.stdout.write(
-                            f"Created supporting material: {supporting_material_name} ({supporting_material_url})"
-                        )
-                        supporting_material_response = httpx.get(
-                            supporting_material_url
-                        )
-                        supporting_material_response.raise_for_status()
-                        supporting_material = Attachment.objects.create(
-                            name=supporting_material_name,
-                            data=supporting_material_response.content,
-                        )
-                        supporting_materials.append(supporting_material)
-
                 school_response = row["School-Response"].strip()
-
-                extras: list[Extra] = []
-                media_coverage = row["Media-Coverage"].strip()
-                if media_coverage:
-                    extra = Extra.objects.create(
-                        name="media-coverage", value=media_coverage
-                    )
-                    extras.append(extra)
-
-                social_media_post = row["Social-Media-Post"].strip()
-                if social_media_post:
-                    extra = Extra.objects.create(
-                        name="social-media-post", value=social_media_post
-                    )
-                    extras.append(extra)
-
-                other_related = row["Other-Related"].strip()
-                if other_related:
-                    extra = Extra.objects.create(
-                        name="other-related", value=other_related
-                    )
-                    extras.append(extra)
 
                 reported_school_str = row["Reported-School"].strip()
                 reported_to_school = reported_school_str == "Yes"
@@ -358,6 +308,51 @@ class Command(BaseCommand):
                 )
                 incident.incident_types.set(incident_types)
                 incident.source_types.set(source_types)
-                incident.supporting_materials.set(supporting_materials)
+
+                media_coverage = row["Media-Coverage"].strip()
+                if media_coverage:
+                    _ = IncidentExtra.objects.create(
+                        incident=incident, name="media-coverage", value=media_coverage
+                    )
+
+                social_media_post = row["Social-Media-Post"].strip()
+                if social_media_post:
+                    _ = IncidentExtra.objects.create(
+                        incident=incident,
+                        name="social-media-post",
+                        value=social_media_post,
+                    )
+
+                other_related = row["Other-Related"].strip()
+                if other_related:
+                    _ = IncidentExtra.objects.create(
+                        incident=incident, name="other-related", value=other_related
+                    )
+
+                supporting_materials_str = row["Supporting-Materials"].strip()
+                if supporting_materials_str:
+                    supporting_materials_parts = [
+                        sm.strip() for sm in supporting_materials_str.split(",")
+                    ]
+                    for supporting_material in supporting_materials_parts:
+                        supporting_material_name, supporting_material_url = (
+                            supporting_material.split("(")
+                        )
+                        supporting_material_name = supporting_material_name.strip()
+                        supporting_material_url = supporting_material_url.strip(
+                            ")"
+                        ).strip()
+                        self.stdout.write(
+                            f"Created supporting material: {supporting_material_name} ({supporting_material_url})"
+                        )
+                        supporting_material_response = httpx.get(
+                            supporting_material_url
+                        )
+                        supporting_material_response.raise_for_status()
+                        _ = SupportingMaterial.objects.create(
+                            incident=incident,
+                            name=supporting_material_name,
+                            data=supporting_material_response.content,
+                        )
 
                 self.stdout.write(f"Created incident: {incident}")

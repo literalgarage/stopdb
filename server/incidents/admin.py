@@ -10,16 +10,68 @@ from django.utils.safestring import mark_safe
 from server.admin import admin_site
 
 from .models import (
-    Attachment,
-    Extra,
+    AttachmentBase,
+    DistrictLogo,
     Incident,
+    IncidentExtra,
     IncidentType,
-    Link,
     Region,
+    RelatedLink,
     School,
     SchoolDistrict,
+    SchoolResponseMaterial,
     SourceType,
+    SupportingMaterial,
 )
+
+# -----------------------------------------------------------------------------
+# Abstract base admin classes
+# -----------------------------------------------------------------------------
+
+
+class AttachmentFormBase(forms.ModelForm):
+    """Arbitrary attachment form."""
+
+    class Meta:
+        """Meta class."""
+
+        # derived classes: add a model =
+        fields = ("choose_file", "name")
+        readonly_fields = ("name",)
+
+    choose_file = forms.FileField(required=False)
+
+    def save(self, *args: t.Any, **kwargs: t.Any):
+        """Save the form."""
+        choose_file = self.cleaned_data.pop("choose_file", None)
+        if choose_file is not None:
+            assert isinstance(choose_file, File)
+            self.instance.name = choose_file.name
+            self.instance.data = choose_file.read()
+        return super().save(*args, **kwargs)
+
+
+class AttachmentAdminBase(admin.TabularInline):
+    # derived classes: Add a model = and a form =
+    fields = ("name", "attachment_display", "choose_file")
+    readonly_fields = ("attachment_display",)
+
+    @admin.display(description="Attachment")
+    def attachment_display(self, obj: AttachmentBase):
+        attachment_url = reverse("incidents:attachment", args=[obj.name])
+        if obj.is_image:
+            return mark_safe(f'<img src="{attachment_url}" style="max-width: 72px;">')
+        return mark_safe(f'<a href="{attachment_url}">{obj.name}</a>')
+
+
+class ExtraAdminBase(admin.TabularInline):
+    list_display = ("name", "value")
+    search_fields = ("name", "value")
+
+
+# -----------------------------------------------------------------------------
+# Concrete admin classes: Region
+# -----------------------------------------------------------------------------
 
 
 class RegionAdmin(admin.ModelAdmin):
@@ -43,58 +95,20 @@ class RegionAdmin(admin.ModelAdmin):
             group.save()
 
 
-class AttachmentForm(forms.ModelForm):
-    """Arbitrary attachment form."""
-
-    class Meta:
-        """Meta class."""
-
-        model = Attachment
-        fields = ("choose_file", "name")
-        readonly_fields = ("name",)
-
-    choose_file = forms.FileField(required=False)
-
-    def save(self, *args: t.Any, **kwargs: t.Any):
-        """Save the form."""
-        choose_file = self.cleaned_data.pop("choose_file", None)
-        if choose_file is not None:
-            assert isinstance(choose_file, File)
-            self.instance.name = choose_file.name
-            self.instance.data = choose_file.read()
-        return super().save(*args, **kwargs)
+# -----------------------------------------------------------------------------
+# Concrete admin classes: School District & School
+# -----------------------------------------------------------------------------
 
 
-class AttachmentAdmin(admin.TabularInline):
-    model = Attachment
-    form = AttachmentForm
-    fields = ("name", "attachment_display", "choose_file")
-    readonly_fields = ("attachment_display",)
-
-    @admin.display(description="Attachment")
-    def attachment_display(self, obj: Attachment):
-        attachment_url = reverse("incidents:attachment", args=[obj.name])
-        if obj.is_image:
-            return mark_safe(f'<img src="{attachment_url}" style="max-width: 72px;">')
-        return mark_safe(f'<a href="{attachment_url}">{obj.name}</a>')
+class DistrictLogoAdminForm(AttachmentFormBase):
+    class Meta(AttachmentFormBase.Meta):
+        model = DistrictLogo
 
 
-class ZeroOrOneAttachmentAdmin(AttachmentAdmin):
+class DistrictLogoAdmin(AttachmentAdminBase):
+    model = DistrictLogo
+    form = DistrictLogoAdminForm
     extra = 0
-
-
-class ExtraAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "value", "has_attachment")
-    search_fields = ("id", "name", "value")
-    inlines = [ZeroOrOneAttachmentAdmin]
-
-    def has_attachment(self, obj):
-        return obj.attachment is not None
-
-
-class LinkAdmin(admin.ModelAdmin):
-    list_display = ("id", "name", "url")
-    search_fields = ("id", "name", "url")
 
 
 class SchoolDistrictAdmin(admin.ModelAdmin):
@@ -110,6 +124,7 @@ class SchoolDistrictAdmin(admin.ModelAdmin):
         "hib_contact_name",
         "hib_contact_email",
     )
+    inlines = [DistrictLogoAdmin]
 
 
 class SchoolAdmin(admin.ModelAdmin):
@@ -135,12 +150,47 @@ class SchoolAdmin(admin.ModelAdmin):
     district_link.allow_tags = True
 
 
+# -----------------------------------------------------------------------------
+# Concrete admin classes: Incident & related models
+# -----------------------------------------------------------------------------
+
+
+class RelatedLinkAdmin(admin.TabularInline):
+    model = RelatedLink
+    list_display = ("name", "url")
+    search_fields = ("name", "url")
+
+
 class IncidentTypeAdmin(admin.ModelAdmin):
     list_display = ("name", "description")
 
 
 class SourceTypeAdmin(admin.ModelAdmin):
     list_display = ("name", "description")
+
+
+class SupportingMaterialForm(AttachmentFormBase):
+    class Meta(AttachmentFormBase.Meta):
+        model = SupportingMaterial
+
+
+class SupportingMaterialAdmin(AttachmentAdminBase):
+    model = SupportingMaterial
+    form = SupportingMaterialForm
+
+
+class SchoolResponseMaterialForm(AttachmentFormBase):
+    class Meta(AttachmentFormBase.Meta):
+        model = SchoolResponseMaterial
+
+
+class SchoolResponseMaterialAdmin(AttachmentAdminBase):
+    model = SchoolResponseMaterial
+    form = SchoolResponseMaterialForm
+
+
+class IncidentExtraAdmin(ExtraAdminBase):
+    model = IncidentExtra
 
 
 class IncidentAdmin(admin.ModelAdmin):
@@ -160,6 +210,12 @@ class IncidentAdmin(admin.ModelAdmin):
         "school__city",
         "school__state",
     )
+    inlines = [
+        SupportingMaterialAdmin,
+        SchoolResponseMaterialAdmin,
+        RelatedLinkAdmin,
+        IncidentExtraAdmin,
+    ]
 
     def incident_types_list(self, obj):
         return ", ".join(
@@ -185,9 +241,6 @@ class IncidentAdmin(admin.ModelAdmin):
 
 
 admin_site.register(Region, RegionAdmin)
-# admin_site.register(Attachment, AttachmentAdmin)
-admin_site.register(Extra, ExtraAdmin)
-admin_site.register(Link, LinkAdmin)
 admin_site.register(SchoolDistrict, SchoolDistrictAdmin)
 admin_site.register(School, SchoolAdmin)
 admin_site.register(IncidentType, IncidentTypeAdmin)
