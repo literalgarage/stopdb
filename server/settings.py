@@ -34,7 +34,9 @@ DEBUG = os.getenv("DEBUG", "False") == "True"
 
 ALLOWED_HOSTS = []
 if not DEBUG:
-    ALLOWED_HOSTS = [BASE_URL.replace("http://", "").replace("https://", "")]
+    ALLOWED_HOSTS = [
+        BASE_URL.replace("http://", "").replace("https://", "").split(":")[0]
+    ]
 
 
 # Application definition
